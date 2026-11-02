@@ -23,6 +23,7 @@ jobs:
           ANKR_KEY: ${{ secrets.ANKR_KEY }}
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          PTAH_WALLET: ${{ secrets.PTAH_WALLET }}
         run: python radar.py
       - name: save state
         run: |
