@@ -94,6 +94,7 @@ def meme(st, now, blk):
         v = ms.setdefault(tok, {"first": now, "plat": plat, "hist": [], "peak": 0, "pushed": []})
         v["hist"].append([now, round(qb, 2)]); v["hist"] = [h for h in v["hist"] if now - h[0] < 7200]
         v["peak"] = max(v["peak"], qb)
+        if qb >= 5: st.setdefault("dt_watch", {}).setdefault(tok, now)  # 地推盘观察池
         old = [h for h in v["hist"] if now - h[0] >= 1500]
         flow = qb - old[0][1] if old else None
         sym = (p.get("baseToken") or {}).get("symbol", "?")
@@ -221,3 +222,69 @@ def robinhood(st, now):
     for tok in list(rs):
         if now - rs[tok].get("first", now) > 2 * 86400: del rs[tok]
     return out[:3]
+
+# ---------- 地推盘（2026-11-02 峰哥：火龙果这种才是地推盘）----------
+# 老池慢涨、持币多且分散、不靠 X。每小时扫一次 GeckoTerminal BSC 24h 成交榜。
+def ditui(st, now):
+    ds = st.setdefault("ditui", {})
+    wl = st.setdefault("dt_watch", {})
+    for tok in list(wl):
+        if now - wl[tok] > 15 * 86400: del wl[tok]
+    cands = dict.fromkeys(wl)
+    for srt in ("h24_volume_usd_desc", "h24_tx_count_desc"):  # 补充来源，限流就跳过
+        for page in (1, 2):
+            d = http(f"https://api.geckoterminal.com/api/v2/networks/bsc/pools?sort={srt}&page={page}") or {}
+            for p in d.get("data", []):
+                try: cands.setdefault(p["relationships"]["base_token"]["data"]["id"].split("_", 1)[1].lower())
+                except Exception: pass
+            time.sleep(2.5)
+    cands = [t for t in cands if not ds.get(t, {}).get("pushed")]
+    out, t0 = [], time.time()
+    for i in range(0, len(cands), 30):
+        if time.time() - t0 > 70 or len(out) >= 3: break
+        pairs = http("https://api.dexscreener.com/tokens/v1/bsc/" + ",".join(cands[i:i + 30]))
+        if not isinstance(pairs, list):
+            pairs = [p for p in ((http("https://api.dexscreener.com/latest/dex/tokens/" + ",".join(cands[i:i + 30])) or {}).get("pairs") or []) if p.get("chainId") == "bsc"]
+        best = {}
+        for p in pairs if isinstance(pairs, list) else []:
+            tok = ((p.get("baseToken") or {}).get("address") or "").lower()
+            if tok and ((p.get("liquidity") or {}).get("usd") or 0) > ((best.get(tok) or {}).get("liquidity") or {}).get("usd", -1): best[tok] = p
+        for tok, p in best.items():
+            if time.time() - t0 > 70 or len(out) >= 3: break
+            age_d = (now * 1000 - (p.get("pairCreatedAt") or now * 1000)) / 8.64e7
+            mc = float(p.get("marketCap") or p.get("fdv") or 0)
+            liq = (p.get("liquidity") or {}).get("usd") or 0
+            tx = (p.get("txns") or {}).get("h24") or {}
+            b, s = tx.get("buys") or 0, tx.get("sells") or 0
+            if not (2 <= age_d <= 14 and 1e6 <= mc <= 2e7 and liq >= 50_000 and b >= 1.5 * max(s, 1)): continue
+            g = (http(f"https://api.gopluslabs.io/api/v1/token_security/56?contract_addresses={tok}") or {}).get("result", {}).get(tok, {})
+            if not g: continue
+            f = lambda k: g.get(k) == "1"
+            if g.get("is_open_source") != "1" or f("is_honeypot") or f("cannot_sell_all") or f("is_mintable") or f("hidden_owner") \
+               or f("owner_change_balance") or f("transfer_pausable") or f("slippage_modifiable") or f("is_blacklisted"): continue
+            if (g.get("owner_address") or "0x0000000000000000000000000000000000000000").lower() not in DEAD: continue
+            try:
+                if max(float(g.get("buy_tax") or 0), float(g.get("sell_tax") or 0)) > 0.03: continue
+            except Exception: continue
+            lp = g.get("lp_holders") or []
+            if sum(float(x.get("percent") or 0) for x in lp if x.get("is_locked") == 1 or (x.get("address") or "").lower() in DEAD) < 0.9: continue
+            hs = [x for x in (g.get("holders") or []) if x.get("is_contract") != 1 and (x.get("address") or "").lower() not in DEAD]
+            if max([float(x.get("percent") or 0) for x in hs[:10]] or [1]) > 0.05: continue
+            h = int(g.get("holder_count") or 0)
+            if h < 3000: continue
+            v = ds.setdefault(tok, {})
+            prev = v.get("h")
+            if prev is None: v.update(h=h, t=now); continue   # 首次只记录
+            if now - v.get("t", now) < 3000: continue          # 隔约 1 小时再比
+            if h <= prev: v.update(h=h, t=now); continue       # 持币数没涨，重新计
+            v["pushed"] = now
+            sym = (p.get("baseToken") or {}).get("symbol", "?")
+            pc = p.get("priceChange") or {}
+            out.append("\n".join([f"🟠 地推盘候选：{sym} · 池龄 {age_d:.1f} 天", f"CA {tok}",
+                f"市值 ${mc:,.0f}，池子 ${liq:,.0f}，24h {pc.get('h24','?')}%，24h 买 {b}/卖 {s}",
+                f"持币 {prev}→{h}（{(now - v['t'])/3600:.1f}h 内），LP 已锁/销毁，税 {g.get('buy_tax')}/{g.get('sell_tax')}，无 owner",
+                p.get("url", f"https://dexscreener.com/bsc/{tok}"), "机器人只管筛，进不进你拍板。"]))
+            st.setdefault("signals", []).append({"tok": tok, "sym": sym, "src": "ditui", "t": now, "chain": "bsc"})
+    for tok in list(ds):
+        if now - ds[tok].get("t", ds[tok].get("pushed", now)) > 15 * 86400: del ds[tok]
+    return out

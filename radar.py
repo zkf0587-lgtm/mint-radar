@@ -191,7 +191,8 @@ import extras
 for name, fn in [("meme", lambda: extras.meme(st, now, blk)),
                  ("x", lambda: extras.xscan(st, now) if time.gmtime(now).tm_min < 10 else []),
                  ("ptah", lambda: extras.ptah(st, now)),
-                 ("robinhood", lambda: extras.robinhood(st, now))]:
+                 ("robinhood", lambda: extras.robinhood(st, now)),
+                 ("ditui", lambda: extras.ditui(st, now))]:
     try: msgs += fn()
     except Exception as e: print(name, "fail", e)
 
@@ -199,7 +200,7 @@ for name, fn in [("meme", lambda: extras.meme(st, now, blk)),
 try:
     import paper
     lg = st.setdefault("pass_log", [])  # 五条全过记录，供 Hark 每晚汇总
-    lg += [dict(s) for s in st.get("signals", []) if s.get("src") in ("rh-5gates", "meme-pool10", "meme-flow3")]
+    lg += [dict(s) for s in st.get("signals", []) if s.get("src") in ("rh-5gates", "meme-pool10", "meme-flow3", "ditui")]
     st["pass_log"] = [s for s in lg if now - s.get("t", now) < 3 * 86400][-200:]
     msgs += paper.run(st, now)
 except Exception as e:
