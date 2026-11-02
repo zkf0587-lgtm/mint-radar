@@ -189,11 +189,12 @@ for c in res["agent_id_candidates"]:
 # 附加：meme 新池 / 整点 X / PTAH（各自独立，出错不影响主扫描）
 import extras
 # 扣字眼已取消（2026-11-02 18:00 峰哥「扣字眼取消」）
-for name, fn in [("meme", lambda: extras.meme(st, now, blk)),
+# 地推盘是主力雷达（2026-11-02 峰哥「一定要重视」）：最先跑，单独推送
+for name, fn in [("ditui", lambda: extras.ditui(st, now)),
+                 ("meme", lambda: extras.meme(st, now, blk)),
                  ("x", lambda: extras.xscan(st, now) if time.gmtime(now).tm_min < 10 else []),
                  ("ptah", lambda: extras.ptah(st, now)),
-                 ("robinhood", lambda: extras.robinhood(st, now)),
-                 ("ditui", lambda: extras.ditui(st, now))]:
+                 ("robinhood", lambda: extras.robinhood(st, now))]:
     try: msgs += fn()
     except Exception as e: print(name, "fail", e)
 
@@ -219,6 +220,9 @@ pl = st.setdefault("push_log", []) + [{"t": now, "text": m} for m in msgs]
 st["push_log"] = [x for x in pl if now - x["t"] < 86400][-150:]
 json.dump(st, open(STATE, "w"))
 
-if msgs:
-    tg("\n\n".join(msgs))
+for m in [m for m in msgs if m.startswith("🟠")]:
+    tg("【主力雷达】\n" + m)  # 每条地推盘单独一条，最先发
+rest = [m for m in msgs if not m.startswith("🟠")]
+if rest:
+    tg("\n\n".join(rest))
 print(f"candidates={len(res['agent_id_candidates'])} pushed={len(msgs)} logs_complete={res['logs_complete']}")
