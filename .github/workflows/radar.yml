@@ -1,18 +1,19 @@
 name: mint-radar
 on:
   schedule:
-    # 北京时间 8:00–次日 1:50；每 10 分钟起一个任务，任务内连跑 3 轮、间隔约 3 分钟
-    - cron: "*/10 0-17 * * *"
+    # 备用启动：GitHub 定时经常不触发，主力靠每轮结束自动接力（workflow_dispatch）
+    - cron: "*/30 * * * *"
   workflow_dispatch: {}
 permissions:
   contents: write
+  actions: write
 concurrency:
   group: radar
   cancel-in-progress: false
 jobs:
   scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 13
+    timeout-minutes: 14
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -24,14 +25,28 @@ jobs:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
           PTAH_WALLET: ${{ secrets.PTAH_WALLET }}
+          CLAWBY_API_KEY: ${{ secrets.CLAWBY_API_KEY }}
         run: |
           git config user.name radar-bot
           git config user.email radar-bot@users.noreply.github.com
-          for i in 1 2 3; do
-            start=$(date +%s)
-            timeout 170 python radar.py || echo "round $i failed"
-            git add state.json
-            git diff --cached --quiet || (git commit -m "state" -q && git push -q) || true
-            [ $i -lt 3 ] && sleep $(( 180 - ($(date +%s) - start) > 0 ? 180 - ($(date +%s) - start) : 0 )) || true
-          done
+          h=$(( ($(date -u +%H | sed 's/^0//') + 8) % 24 ))
+          if [ $h -ge 2 ] && [ $h -lt 8 ]; then
+            echo "北京时间 ${h} 点，休息时段，只等待接力"; sleep 540
+          else
+            for i in 1 2 3; do
+              start=$(date +%s)
+              timeout 170 python radar.py || echo "round $i failed"
+              git add state.json
+              git diff --cached --quiet || (git commit -m "state" -q && git pull -q --rebase && git push -q) || true
+              if [ $i -lt 3 ]; then w=$(( 180 - ($(date +%s) - start) )); if [ $w -gt 0 ]; then sleep $w; fi; fi
+            done
+          fi
           exit 0
+      - name: relay next run
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          n=$(gh run list --workflow radar.yml --repo ${{ github.repository }} --json status --jq '[.[]|select(.status=="queued" or .status=="in_progress" or .status=="pending" or .status=="waiting")]|length')
+          echo "active runs: $n"
+          if [ "$n" -le 1 ]; then gh workflow run radar.yml --repo ${{ github.repository }} --ref main; fi
