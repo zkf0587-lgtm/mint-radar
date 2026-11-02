@@ -15,7 +15,7 @@ def http(url, timeout=15):
 # ---------- 1. meme 新池（Flap 7777 / Four 4444，池龄 <=12h）----------
 
 DEAD = {"0x000000000000000000000000000000000000dead", "0x0000000000000000000000000000000000000000"}
-def five_gates(tok, sym, p, g, age_h, st):
+def five_gates(tok, sym, p, g, age_h, st, lp_hook_ok=False):
     """峰哥五条（2026-11-02）：全部满足才推，拍板仍是人。返回不通过的原因列表。"""
     bad = []
     mc = float(p.get("marketCap") or p.get("fdv") or 0)
@@ -35,7 +35,8 @@ def five_gates(tok, sym, p, g, age_h, st):
         except Exception: pass
         lp = g.get("lp_holders") or []
         safe = sum(float(x.get("percent") or 0) for x in lp if x.get("is_locked") == 1 or (x.get("address") or "").lower() in DEAD)
-        if not lp: bad.append("LP 未查到")
+        if not lp and lp_hook_ok: pass  # Pons/Uniswap v4：流动性由 hook 永久锁定，GoPlus 读不到 LP 持有人
+        elif not lp: bad.append("LP 未查到")
         elif safe < 0.9: bad.append(f"LP 仅 {safe:.0%} 锁定/销毁")
         hs = [x for x in (g.get("holders") or []) if x.get("is_contract") != 1 and x.get("is_locked") != 1 and (x.get("address") or "").lower() not in DEAD]
         top10 = sum(float(x.get("percent") or 0) for x in hs[:10])
@@ -176,3 +177,47 @@ def ptah(st, now):
         return [f"⏰ PTAH 待领 {amt:,.0f} 枚，已满 5000。回 Hark「领 PTAH」，领完报价，卖不卖你定。"]
     if amt < 5000: st["ptah_notified"] = 0
     return []
+
+
+# ---------- Robinhood Chain（4663）meme：峰哥五条全过才推 ----------
+def robinhood(st, now):
+    rs = st.setdefault("rh", {})
+    toks = {}
+    for page in (1, 2):
+        d = http(f"https://api.geckoterminal.com/api/v2/networks/robinhood/new_pools?page={page}") or {}
+        for p in d.get("data", []):
+            try: toks[p["relationships"]["base_token"]["data"]["id"].split("_", 1)[1].lower()] = 1
+            except Exception: pass
+        time.sleep(2)
+    for tok, v in rs.items():
+        if now - v.get("first", now) < 86400 and not v.get("pushed"): toks.setdefault(tok, 1)
+    out, t0 = [], time.time()
+    for tok in list(toks)[:30]:
+        if time.time() - t0 > 50: break
+        v = rs.setdefault(tok, {"first": now})
+        if v.get("pushed"): continue
+        d = http(f"https://api.dexscreener.com/latest/dex/tokens/{tok}") or {}
+        ps = [p for p in d.get("pairs") or [] if p.get("chainId") == "robinhood" and (p.get("baseToken") or {}).get("address", "").lower() == tok]
+        if not ps: continue
+        p = max(ps, key=lambda x: (x.get("liquidity") or {}).get("usd") or 0)
+        age_h = (now * 1000 - (p.get("pairCreatedAt") or now * 1000)) / 3.6e6
+        mc = float(p.get("marketCap") or p.get("fdv") or 0)
+        if age_h > 24 or mc < 100_000 or age_h < 10 / 60: continue  # 先用免费字段粗筛，省 GoPlus 调用
+        g = (http(f"https://api.gopluslabs.io/api/v1/token_security/4663?contract_addresses={tok}") or {}).get("result", {}).get(tok, {})
+        sym = (p.get("baseToken") or {}).get("symbol", "?")
+        hook = "pons" in (p.get("dexId") or "").lower() or "v4" in [str(x).lower() for x in (p.get("labels") or [])]
+        bad, hit = five_gates(tok, sym, p, g, age_h, st, lp_hook_ok=hook)
+        if bad: print("rh gate", sym, "；".join(bad)); continue
+        v["pushed"] = now
+        liq = (p.get("liquidity") or {}).get("usd") or 0
+        tx = (p.get("txns") or {}).get("h1") or {}
+        L = [f"🟢 Robinhood 链 meme 五条全过：{sym} · {p.get('dexId')} · 上线 {age_h:.1f}h", f"CA {tok}",
+             f"市值 ${mc:,.0f}，池子 ${liq:,.0f}，1h 买 {tx.get('buys',0)}/卖 {tx.get('sells',0)}",
+             f"GoPlus：买/卖税 {g.get('buy_tax','?')}/{g.get('sell_tax','?')}，持币 {g.get('holder_count','?')}" + ("，LP 由 v4 hook 锁定" if hook and not g.get('lp_holders') else ""),
+             "X 讨论：" + "、".join(dict.fromkeys(hit[:4])), p.get("url", ""),
+             "机器人只管筛，进不进你拍板。注意：要 Robinhood 链 ETH 作 gas。"]
+        out.append("\n".join(L))
+        st.setdefault("signals", []).append({"tok": tok, "sym": sym, "src": "rh-5gates", "t": now, "chain": "robinhood"})
+    for tok in list(rs):
+        if now - rs[tok].get("first", now) > 2 * 86400: del rs[tok]
+    return out[:3]

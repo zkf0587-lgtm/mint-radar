@@ -190,7 +190,8 @@ for c in res["agent_id_candidates"]:
 import extras
 for name, fn in [("meme", lambda: extras.meme(st, now, blk)),
                  ("x", lambda: extras.xscan(st, now) if time.gmtime(now).tm_min < 10 else []),
-                 ("ptah", lambda: extras.ptah(st, now))]:
+                 ("ptah", lambda: extras.ptah(st, now)),
+                 ("robinhood", lambda: extras.robinhood(st, now))]:
     try: msgs += fn()
     except Exception as e: print(name, "fail", e)
 

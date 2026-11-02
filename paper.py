@@ -16,7 +16,7 @@ def pair(tok):
         return None
     best = None
     for p in d.get("pairs") or []:
-        if p.get("chainId") != "bsc" or not p.get("priceUsd"): continue
+        if p.get("chainId") not in ("bsc", "robinhood") or not p.get("priceUsd"): continue
         liq = (p.get("liquidity") or {}).get("usd") or 0
         if best is None or liq > best[1]: best = (float(p["priceUsd"]), liq)
     return best  # (price, liquidity_usd)
