@@ -212,6 +212,9 @@ for h in list(st["code_hashes"]):
     st["code_hashes"][h] = {a: t for a, t in st["code_hashes"][h].items() if now - t < 86400}
     if not st["code_hashes"][h]: del st["code_hashes"][h]
 st["pushed"] = {k: t for k, t in st["pushed"].items() if now - t < 3 * 86400}
+# TG 推送原文留底，供 Hark 每小时转发到聊天（2026-11-02 峰哥「这边也发一份」）
+pl = st.setdefault("push_log", []) + [{"t": now, "text": m} for m in msgs]
+st["push_log"] = [x for x in pl if now - x["t"] < 86400][-150:]
 json.dump(st, open(STATE, "w"))
 
 if msgs:
