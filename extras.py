@@ -67,6 +67,8 @@ def meme(st, now, blk):
         if g.get("hidden_owner") == "1" or g.get("owner_change_balance") == "1": bad.append("owner 可改余额")
         if bad and sig != "retreat": v["pushed"].append(sig); continue
         v["pushed"].append(sig)
+        if sig != "retreat":
+            st.setdefault("signals", []).append({"tok": tok, "sym": sym, "src": f"meme-{sig}", "t": now})
         site = ""
         for w in (p.get("info") or {}).get("websites") or []: site = w.get("url", ""); break
         head = {"pool10": "🟢 meme 池内真钱 ≥10 BNB", "flow3": "🟢 meme 30 分钟净流入 ≥3 BNB", "retreat": "🔴 已推 meme 真钱撤退（较高点 -30%）"}[sig]

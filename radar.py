@@ -151,6 +151,7 @@ for c in res["agent_id_candidates"]:
     if site: lines.append(f"官网 {site}")
     lines.append(f"建议：{'NFT ≤10U/项目' if kind == 'NFT' else '付费 ≤10U/笔，每日 ≤30U'}；2 倍回本，5/10 倍分批，回撤 30% 走。退款函数/DEV 历史未自动核实，上车前发给 Hark 复核。")
     msgs.append("\n".join(lines))
+    st.setdefault("signals", []).append({"tok": a, "sym": c["symbol"] or "?", "src": f"mint-{kind}", "t": now})
 
 # 附加：meme 新池 / 整点 X / PTAH（各自独立，出错不影响主扫描）
 import extras
@@ -159,6 +160,13 @@ for name, fn in [("meme", lambda: extras.meme(st, now, blk)),
                  ("ptah", lambda: extras.ptah(st, now))]:
     try: msgs += fn()
     except Exception as e: print(name, "fail", e)
+
+# 模拟盘（只记账，不交易）
+try:
+    import paper
+    msgs += paper.run(st, now)
+except Exception as e:
+    print("paper fail", e)
 
 # 清理旧状态
 for k in list(st["seen"]):
