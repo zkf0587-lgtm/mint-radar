@@ -32,5 +32,6 @@ jobs:
             timeout 170 python radar.py || echo "round $i failed"
             git add state.json
             git diff --cached --quiet || (git commit -m "state" -q && git push -q) || true
-            [ $i -lt 3 ] && sleep $(( 180 - ($(date +%s) - start) > 0 ? 180 - ($(date +%s) - start) : 0 ))
+            [ $i -lt 3 ] && sleep $(( 180 - ($(date +%s) - start) > 0 ? 180 - ($(date +%s) - start) : 0 )) || true
           done
+          exit 0
