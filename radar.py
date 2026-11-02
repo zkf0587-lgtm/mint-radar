@@ -198,6 +198,9 @@ for name, fn in [("meme", lambda: extras.meme(st, now, blk)),
 # 模拟盘（只记账，不交易）
 try:
     import paper
+    lg = st.setdefault("pass_log", [])  # 五条全过记录，供 Hark 每晚汇总
+    lg += [dict(s) for s in st.get("signals", []) if s.get("src") in ("rh-5gates", "meme-pool10", "meme-flow3")]
+    st["pass_log"] = [s for s in lg if now - s.get("t", now) < 3 * 86400][-200:]
     msgs += paper.run(st, now)
 except Exception as e:
     print("paper fail", e)
