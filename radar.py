@@ -107,7 +107,7 @@ def tg(text):
 
 res = sc.chain_scan(WINDOW)
 msgs = []
-STOP = time.time() + 150  # 单轮检查上限，防止超时
+STOP = time.time() + 60  # 单轮检查上限，防止超时
 for c in res["agent_id_candidates"]:
     if time.time() > STOP: break
     a = c["contract"]

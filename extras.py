@@ -29,7 +29,7 @@ def meme(st, now, blk):
         if now - v.get("first", now) < 43200: cands.setdefault(tok, v.get("plat", "?"))
     t0 = time.time()
     for tok, plat in list(cands.items())[:40]:
-        if time.time() - t0 > 120: break
+        if time.time() - t0 > 60: break
         d = http(f"https://api.dexscreener.com/latest/dex/tokens/{tok}") or {}
         best = None
         for p in d.get("pairs") or []:
