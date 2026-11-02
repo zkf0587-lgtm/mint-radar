@@ -6,7 +6,7 @@
 - 真钱门槛：30 分钟合约 BNB 流入 >=3 BNB，或池内 BNB >=10 / 30 分钟净流入 >=3 BNB
 - 矩阵农场（同一批钱包铸 >=3 个合约）不推；同一份字节码 24h 部署 >=3 次不推；DEV 黑名单永久不推
 - 免费 NFT：进度 >=70%、>=150 个钱包、必须有每钱包上限、图片能打开且不重复，才推
-- 推送带建议：付费 <=1U/笔，NFT <=10U/项目；2 倍回本、5/10 倍分批、回撤 30% 走
+- 推送带建议：付费 <=10U/笔、每日 <=30U，NFT <=10U/项目；2 倍回本、5/10 倍分批、回撤 30% 走
 """
 import json, os, time, hashlib, urllib.request
 import scan_core as sc
@@ -149,8 +149,16 @@ for c in res["agent_id_candidates"]:
              f"合约 BNB {bal:.2f}" + (f"，30 分钟流入 {inflow:+.2f}" if inflow is not None else "") + (f"，池内 BNB {pbnb:.1f}" if pool else "，未开池")]
     if extra: lines.append(extra)
     if site: lines.append(f"官网 {site}")
-    lines.append(f"建议：{'NFT ≤10U/项目' if kind == 'NFT' else '付费 ≤1U/笔'}；2 倍回本，5/10 倍分批，回撤 30% 走。退款函数/DEV 历史未自动核实，上车前发给 Hark 复核。")
+    lines.append(f"建议：{'NFT ≤10U/项目' if kind == 'NFT' else '付费 ≤10U/笔，每日 ≤30U'}；2 倍回本，5/10 倍分批，回撤 30% 走。退款函数/DEV 历史未自动核实，上车前发给 Hark 复核。")
     msgs.append("\n".join(lines))
+
+# 附加：meme 新池 / 整点 X / PTAH（各自独立，出错不影响主扫描）
+import extras
+for name, fn in [("meme", lambda: extras.meme(st, now, blk)),
+                 ("x", lambda: extras.xscan(st, now) if time.gmtime(now).tm_min < 10 else []),
+                 ("ptah", lambda: extras.ptah(st, now))]:
+    try: msgs += fn()
+    except Exception as e: print(name, "fail", e)
 
 # 清理旧状态
 for k in list(st["seen"]):
