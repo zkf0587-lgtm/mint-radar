@@ -256,7 +256,13 @@ def ditui(st, now):
             liq = (p.get("liquidity") or {}).get("usd") or 0
             tx = (p.get("txns") or {}).get("h24") or {}
             b, s = tx.get("buys") or 0, tx.get("sells") or 0
-            if not (2 <= age_d <= 14 and 1e6 <= mc <= 2e7 and liq >= 50_000 and b >= 1.5 * max(s, 1)): continue
+            pc24 = float((p.get("priceChange") or {}).get("h24") or 0)
+            if 2 <= age_d <= 14 and 1e6 <= mc <= 2e7 and liq >= 50_000: tier, hmin = "mature", 3000
+            elif 0.25 <= age_d < 2 and 1e5 <= mc <= 2e7 and liq >= 15_000 and -10 <= pc24 <= 300: tier, hmin = "early", 500
+            else: continue
+            if b < 1.5 * max(s, 1) or (tier == "early" and b < 300): continue
+            v = ds.setdefault(tok, {})
+            if v.get("t") and now - v["t"] < 3000: continue        # 每币约 1 小时查一次 GoPlus
             g = (http(f"https://api.gopluslabs.io/api/v1/token_security/56?contract_addresses={tok}") or {}).get("result", {}).get(tok, {})
             if not g: continue
             f = lambda k: g.get(k) == "1"
@@ -271,20 +277,20 @@ def ditui(st, now):
             hs = [x for x in (g.get("holders") or []) if x.get("is_contract") != 1 and (x.get("address") or "").lower() not in DEAD]
             if max([float(x.get("percent") or 0) for x in hs[:10]] or [1]) > 0.05: continue
             h = int(g.get("holder_count") or 0)
-            if h < 3000: continue
-            v = ds.setdefault(tok, {})
-            prev = v.get("h")
-            if prev is None: v.update(h=h, t=now); continue   # 首次只记录
-            if now - v.get("t", now) < 3000: continue          # 隔约 1 小时再比
-            if h <= prev: v.update(h=h, t=now); continue       # 持币数没涨，重新计
+            if h < hmin: continue
+            hh = v.setdefault("hh", []); hh.append([now, h]); v["hh"] = hh = hh[-6:]; v["t"] = now
+            if v.get("h") is None: v["h"] = h
+            need = 2 if tier == "mature" else 4                    # 早期要连续 3 小时持币数都在涨
+            if len(hh) < need or any(hh[k + 1][1] <= hh[k][1] for k in range(len(hh) - need, len(hh) - 1)): continue
+            prev = hh[-need][1]; v["t0"] = hh[-need][0]
             v["pushed"] = now
             sym = (p.get("baseToken") or {}).get("symbol", "?")
             pc = p.get("priceChange") or {}
-            out.append("\n".join([f"🟠 地推盘候选：{sym} · 池龄 {age_d:.1f} 天", f"CA {tok}",
+            out.append("\n".join([f"🟠 地推盘候选{'（早期，风险更高）' if tier == 'early' else ''}：{sym} · 池龄 {age_d:.1f} 天", f"CA {tok}",
                 f"市值 ${mc:,.0f}，池子 ${liq:,.0f}，24h {pc.get('h24','?')}%，24h 买 {b}/卖 {s}",
-                f"持币 {prev}→{h}（{(now - v['t'])/3600:.1f}h 内），LP 已锁/销毁，税 {g.get('buy_tax')}/{g.get('sell_tax')}，无 owner",
+                f"持币 {prev}→{h}（{(now - v['t0'])/3600:.1f}h 连涨），LP 已锁/销毁，税 {g.get('buy_tax')}/{g.get('sell_tax')}，无 owner",
                 p.get("url", f"https://dexscreener.com/bsc/{tok}"), "机器人只管筛，进不进你拍板。"]))
-            st.setdefault("signals", []).append({"tok": tok, "sym": sym, "src": "ditui", "t": now, "chain": "bsc"})
+            st.setdefault("signals", []).append({"tok": tok, "sym": sym, "src": "ditui", "tier": tier, "t": now, "chain": "bsc"})
     for tok in list(ds):
         if now - ds[tok].get("t", ds[tok].get("pushed", now)) > 15 * 86400: del ds[tok]
     return out
