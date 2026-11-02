@@ -188,7 +188,10 @@ for c in res["agent_id_candidates"]:
 
 # 附加：meme 新池 / 整点 X / PTAH（各自独立，出错不影响主扫描）
 import extras
+try: extras.kz_feed(st, now)
+except Exception as e: print("kz_feed fail", e)
 for name, fn in [("meme", lambda: extras.meme(st, now, blk)),
+                 ("kouzi", lambda: extras.kouzi(st, now)),
                  ("x", lambda: extras.xscan(st, now) if time.gmtime(now).tm_min < 10 else []),
                  ("ptah", lambda: extras.ptah(st, now)),
                  ("robinhood", lambda: extras.robinhood(st, now)),

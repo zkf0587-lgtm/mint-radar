@@ -99,6 +99,8 @@ def meme(st, now, blk):
         flow = qb - old[0][1] if old else None
         sym = (p.get("baseToken") or {}).get("symbol", "?")
         tx = (p.get("txns") or {}).get("h1") or {}
+        try: kz_check(st, now, tok, plat, p, qb, age_h)
+        except Exception as e: print("kz fail", e)
         sig = None
         if qb >= 10 and "pool10" not in v["pushed"]: sig = "pool10"
         elif flow is not None and flow >= 3 and "flow3" not in v["pushed"]: sig = "flow3"
@@ -293,4 +295,61 @@ def ditui(st, now):
             st.setdefault("signals", []).append({"tok": tok, "sym": sym, "src": "ditui", "tier": tier, "t": now, "chain": "bsc"})
     for tok in list(ds):
         if now - ds[tok].get("t", ds[tok].get("pushed", now)) > 15 * 86400: del ds[tok]
+    return out
+
+
+# ---------- 扣字眼（2026-11-02 峰哥：扣何一 / CZ 字眼的币，例如「我靠」）----------
+KZ_HANDLES = ["cz_binance", "heyibinance"]
+KZ_SKIP = {"bnb", "binance", "币安", "cz", "heyi", "一姐", "the", "and", "for", "you", "this", "that", "with", "btc", "eth",
+           "usdt", "usdc", "sol", "meme", "coin", "token", "crypto", "web3", "build", "ai", "bsc", "new", "big", "good", "yes", "lol"}
+_kz_out = []
+def kz_feed(st, now):
+    """每轮拉 CZ / 何一 最近推文（只读）。"""
+    kt = st.setdefault("kz_tw", [])
+    have = {x[3] for x in kt}
+    for h in KZ_HANDLES:
+        d = http(f"https://api.fxtwitter.com/2/profile/{h}/statuses?count=15") or {}
+        for t in d.get("results") or []:
+            u = t.get("url") or ""
+            ts = int(t.get("created_timestamp") or 0)
+            if u in have or now - ts > 86400: continue
+            txt = t.get("text") or ""
+            q = t.get("quote") or {}
+            if q.get("text"): txt += " " + q["text"]
+            kt.append([ts, h, txt[:600], u]); have.add(u)
+        time.sleep(1)
+    st["kz_tw"] = [x for x in kt if now - x[0] < 86400][-100:]
+def _kz_hit(name, txt):
+    n = (name or "").strip().lower().lstrip("$")
+    if len(n) < 2 or n in KZ_SKIP: return False
+    if re.fullmatch(r"[a-z0-9 ]+", n):
+        return len(n) >= 3 and re.search(r"(?<![a-z0-9])" + re.escape(n) + r"(?![a-z0-9])", txt.lower()) is not None
+    return n in txt.lower()
+def kz_check(st, now, tok, plat, p, qb, age_h):
+    ks = st.setdefault("kz", {})
+    if tok in ks: return
+    bt = p.get("baseToken") or {}
+    name, sym = bt.get("name") or "", bt.get("symbol") or ""
+    for ts, h, txt, url in st.get("kz_tw", []):
+        if not (_kz_hit(name, txt) or _kz_hit(sym, txt)): continue
+        word = name if _kz_hit(name, txt) else sym
+        same = sum(1 for v in ks.values() if v.get("w") == word.lower())
+        ks[tok] = {"t": now, "w": word.lower()}
+        if same >= 3: return  # 同一字眼已推 3 个，后面的仿盘不推
+        g = ((http(f"https://api.gopluslabs.io/api/v1/token_security/56?contract_addresses={tok}") or {}).get("result") or {}).get(tok, {})
+        bad = [n for k, n in [("is_honeypot", "貔貅"), ("cannot_sell_all", "不能全卖"), ("is_mintable", "可增发"), ("hidden_owner", "隐藏 owner"), ("owner_change_balance", "owner 可改余额")] if g.get(k) == "1"]
+        mc = float(p.get("marketCap") or p.get("fdv") or 0)
+        tx = (p.get("txns") or {}).get("h1") or {}
+        snip = txt.replace("\n", " ")
+        i = snip.lower().find(word.lower()); snip = snip[max(0, i - 40): i + 60]
+        _kz_out.append("\n".join([f"🔵 扣字眼：{name}（{sym}）· {plat} · 上线 {age_h*60:.0f} 分钟" + (f" · 同字眼第 {same+1} 个" if same else ""),
+            f"CA {tok}", f"@{h} {time.strftime('%H:%M', time.gmtime(ts + 8*3600))}：…{snip}…", url,
+            f"池内约 {qb:.1f} BNB，市值 ${mc:,.0f}，1h 买 {tx.get('buys',0)}/卖 {tx.get('sells',0)}",
+            "GoPlus：" + ("⚠️" + "、".join(bad) if bad else (f"未见貔貅，税 {g.get('buy_tax','?')}/{g.get('sell_tax','?')}" if g else "暂无数据")),
+            p.get("url", ""), "只是字眼匹配，没过五条，进不进你拍板。"]))
+        return
+def kouzi(st, now):
+    for tok in list(st.get("kz", {})):
+        if now - st["kz"][tok]["t"] > 2 * 86400: del st["kz"][tok]
+    out = _kz_out[:5]; _kz_out.clear()
     return out
