@@ -26,6 +26,7 @@ jobs:
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
           PTAH_WALLET: ${{ secrets.PTAH_WALLET }}
           CLAWBY_API_KEY: ${{ secrets.CLAWBY_API_KEY }}
+          ETHERSCAN_KEY: ${{ secrets.ETHERSCAN_KEY }}
         run: |
           git config user.name radar-bot
           git config user.email radar-bot@users.noreply.github.com
