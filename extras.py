@@ -13,6 +13,51 @@ def http(url, timeout=15):
         return None
 
 # ---------- 1. meme 新池（Flap 7777 / Four 4444，池龄 <=12h）----------
+
+DEAD = {"0x000000000000000000000000000000000000dead", "0x0000000000000000000000000000000000000000"}
+def five_gates(tok, sym, p, g, age_h, st):
+    """峰哥五条（2026-11-02）：全部满足才推，拍板仍是人。返回不通过的原因列表。"""
+    bad = []
+    mc = float(p.get("marketCap") or p.get("fdv") or 0)
+    if mc < 100_000: bad.append(f"市值 ${mc:,.0f} <10 万")
+    if age_h < 10 / 60: bad.append("上线不足 10 分钟")
+    f = lambda k: g.get(k) == "1"
+    if not g: bad.append("GoPlus 无数据")
+    else:
+        if g.get("is_open_source") != "1": bad.append("未开源")
+        if f("is_honeypot") or f("cannot_sell_all") or f("cannot_buy"): bad.append("蜜罐")
+        for k, n in [("is_mintable", "可增发"), ("hidden_owner", "隐藏 owner"), ("can_take_back_ownership", "可收回 owner"),
+                     ("owner_change_balance", "owner 可改余额"), ("transfer_pausable", "可暂停转账"), ("slippage_modifiable", "税可改"),
+                     ("is_blacklisted", "有黑名单"), ("selfdestruct", "可自毁")]:
+            if f(k): bad.append(n)
+        try:
+            if max(float(g.get("buy_tax") or 0), float(g.get("sell_tax") or 0)) > 0.1: bad.append("税 >10%")
+        except Exception: pass
+        lp = g.get("lp_holders") or []
+        safe = sum(float(x.get("percent") or 0) for x in lp if x.get("is_locked") == 1 or (x.get("address") or "").lower() in DEAD)
+        if not lp: bad.append("LP 未查到")
+        elif safe < 0.9: bad.append(f"LP 仅 {safe:.0%} 锁定/销毁")
+        hs = [x for x in (g.get("holders") or []) if x.get("is_contract") != 1 and x.get("is_locked") != 1 and (x.get("address") or "").lower() not in DEAD]
+        top10 = sum(float(x.get("percent") or 0) for x in hs[:10])
+        big = max([float(x.get("percent") or 0) for x in hs[:10]] or [0])
+        try: cp = float(g.get("creator_percent") or 0)
+        except Exception: cp = 0
+        if not hs: bad.append("持仓未查到")
+        elif top10 > 0.30 or big > 0.05 or cp > 0.05: bad.append(f"持仓集中（前十 {top10:.0%}，最大 {big:.0%}，DEV {cp:.0%}）")
+    # X 讨论：车头近 6h 提到 CA 或 $符号，或项目 X 账号 ≥1000 粉
+    tl = tok.lower(); ss = f"${sym}".lower() if sym and sym != "?" else None
+    hit = [x[1] for x in st.get("x_recent", []) if tl in x[2].lower() or (ss and ss in x[2].lower())]
+    xok = bool(hit)
+    if not xok:
+        for so in (p.get("info") or {}).get("socials") or []:
+            if so.get("type") == "twitter":
+                hnd = (so.get("url") or "").rstrip("/").split("/")[-1]
+                u = (http(f"https://api.fxtwitter.com/{hnd}") or {}).get("user") or {}
+                if (u.get("followers") or 0) >= 1000: xok = True; hit = [f"项目号 {u.get('followers')} 粉"]
+                break
+    if not xok: bad.append("X 上没看到讨论")
+    return bad, hit
+
 def meme(st, now, blk):
     ms = st.setdefault("meme", {})
     out, cands = [], {}
@@ -68,6 +113,11 @@ def meme(st, now, blk):
         if g.get("hidden_owner") == "1" or g.get("owner_change_balance") == "1": bad.append("owner 可改余额")
         devl, devbad = clawby.dev_line(g.get("creator_address"), st) if sig != "retreat" else ("", False)
         if devbad: bad.append("DEV 连发/有前科")
+        xhit = []
+        if sig != "retreat":
+            gb, xhit = five_gates(tok, sym, p, g, age_h, st)
+            if gb:  # 没过五条：不推不记，下轮继续看（同一信号可能之后达标）
+                print("gate", sym, "；".join(gb)); continue
         if bad and sig != "retreat": v["pushed"].append(sig); continue
         v["pushed"].append(sig)
         if sig != "retreat":
@@ -78,6 +128,8 @@ def meme(st, now, blk):
         L = [f"{head}：{sym} · {plat} · 池龄 {age_h:.1f}h", f"CA {tok}",
              f"池内约 {qb:.1f} BNB" + (f"，30 分钟 {flow:+.1f}" if flow is not None else "") + f"，市值 ${int(p.get('marketCap') or p.get('fdv') or 0):,}，1h 买 {tx.get('buys',0)}/卖 {tx.get('sells',0)}"]
         if g: L.append("GoPlus：" + ("、".join(bad) if bad else f"未见貔貅，买/卖税 {g.get('buy_tax','?')}/{g.get('sell_tax','?')}，持币 {g.get('holder_count','?')}"))
+        if xhit: L.append("X 讨论：" + "、".join(dict.fromkeys(xhit[:4])))
+        if sig != "retreat": L.append("五条已过：市值≥10万、上线>10分钟、合约干净+LP 锁/烧+无蜜罐、持仓分散、X 有讨论。进不进你拍板。")
         if devl: L.append(devl)
         if site: L.append(f"官网 {site}")
         L.append(p.get("url", ""))
@@ -104,10 +156,12 @@ def xscan(st, now):
             if last == 0: continue  # 首次只记位置不推
             if now - int(t.get("created_timestamp") or now) > 5400: continue
             txt = (t.get("text") or "").replace("\n", " ")
+            st.setdefault("x_recent", []).append([now, h, txt[:400]])
             if not KW.search(txt): continue
             out.append(f"@{h}：{txt[:110]}\n{t.get('url','')}")
         xs[h] = str(top)
         time.sleep(1)
+    st["x_recent"] = [x for x in st.get("x_recent", []) if now - x[0] < 6 * 3600][-300:]
     return out[:8]
 
 # ---------- 3. PTAH 待领提醒（只读；钱包地址放 Secret PTAH_WALLET）----------
