@@ -194,7 +194,8 @@ for name, fn in [("ditui", lambda: extras.ditui(st, now)),
                  ("meme", lambda: extras.meme(st, now, blk)),
                  ("x", lambda: extras.xscan(st, now) if time.gmtime(now).tm_min < 10 else []),
                  ("ptah", lambda: extras.ptah(st, now)),
-                 ("robinhood", lambda: extras.robinhood(st, now))]:
+                 ("robinhood", lambda: extras.robinhood(st, now)),
+                 ("watch", lambda: extras.watch(st, now))]:
     try: msgs += fn()
     except Exception as e: print(name, "fail", e)
 

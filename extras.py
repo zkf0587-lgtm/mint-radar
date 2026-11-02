@@ -353,3 +353,33 @@ def kouzi(st, now):
         if now - st["kz"][tok]["t"] > 2 * 86400: del st["kz"][tok]
     out = _kz_out[:5]; _kz_out.clear()
     return out
+
+# ---------- 观察名单（峰哥说「观察」的币，条件触发各推一次）----------
+WATCH = [{"tok": "0x6511c233790ec10f7d673c64dc82c3f941d57828", "chain": "robinhood", "sym": "OAK", "x": "OakAgentKit", "since": "2026-11-02"}]
+def watch(st, now):
+    ws = st.setdefault("watch", {})
+    out = []
+    for w in WATCH:
+        v = ws.setdefault(w["tok"], {"hit": []})
+        d = http(f"https://api.dexscreener.com/latest/dex/tokens/{w['tok']}") or {}
+        ps = [p for p in d.get("pairs") or [] if p.get("chainId") == w["chain"]]
+        if not ps: continue
+        p = max(ps, key=lambda x: (x.get("liquidity") or {}).get("usd") or 0)
+        mc = float(p.get("marketCap") or p.get("fdv") or 0); liq = (p.get("liquidity") or {}).get("usd") or 0
+        v["low"] = min(v.get("low", mc), mc)
+        fol = None
+        if w.get("x") and time.gmtime(now).tm_min < 10:
+            fol = ((http(f"https://api.fxtwitter.com/{w['x']}") or {}).get("user") or {}).get("followers")
+        conds = [("mc150", mc >= 150_000, f"市值站上 $150K（${mc:,.0f}）"),
+                 ("hold100", v["low"] < 80_000 and mc >= 100_000, f"回调到 ${v['low']:,.0f} 后重回 $100K 以上（${mc:,.0f}）"),
+                 ("liq50", liq >= 50_000, f"池子涨到 ${liq:,.0f}"),
+                 ("x1000", (fol or 0) >= 1000, f"X 粉丝到 {fol}"),
+                 ("dump", mc <= 40_000, f"跌破 $40K（${mc:,.0f}），观察结束建议放弃")]
+        for k, ok, txt in conds:
+            if ok and k not in v["hit"]:
+                v["hit"].append(k)
+                out.append("\n".join([f"👀 观察币 {w['sym']}（{w['chain']}）：{txt}", f"CA {w['tok']}",
+                    f"市值 ${mc:,.0f}，池子 ${liq:,.0f}，1h {(p.get('priceChange') or {}).get('h1','?')}%", p.get("url", ""),
+                    "只是提醒，进不进你拍板，上车前发 Hark 复核。"]))
+        time.sleep(1)
+    return out
