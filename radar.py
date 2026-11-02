@@ -94,6 +94,34 @@ def nft_checks(a, minters):
     out["ok"] = not out["why"]
     return out
 
+
+import re
+def _source(a):
+    key = os.environ.get("ETHERSCAN_KEY")
+    if not key: return None
+    try:
+        d = http(f"https://api.etherscan.io/v2/api?chainid=56&module=contract&action=getsourcecode&address={a}&apikey={key}", 20)
+        r = d["result"][0]
+        src = r.get("SourceCode") or ""
+        if r.get("Implementation"):
+            d2 = http(f"https://api.etherscan.io/v2/api?chainid=56&module=contract&action=getsourcecode&address={r['Implementation']}&apikey={key}", 20)
+            src += d2["result"][0].get("SourceCode") or ""
+        return src
+    except Exception:
+        return None
+def mechanism(a):
+    """峰哥规则（2026-11-02）：付费铸造若既无用户退款、又无打满自动加池 → 不推。读已验证源码；未验证 = 两样都算没有。
+    返回 (有退款, 自动加池, 是否已验证)；ETHERSCAN_KEY 缺失时返回 None 表示无法判断（不拦）。"""
+    if not os.environ.get("ETHERSCAN_KEY"): return None
+    src = _source(a)
+    if not src:
+        code = (sc.rpc("eth_getCode", [a, "latest"]) or "").lower()
+        if any(("63" + x) in code for x in ["f305d719", "e8e33700", "dd46508f", "6a627842"]): return (False, True, False)
+        return None  # 未验证且字节码看不出：无法判断，不拦，推送里标注
+    refund = bool(re.search(r"function\s+(refund|claimRefund|withdrawRefund|getRefund|refundAll|redeemRefund|claimRefunds)\s*\(", src))
+    autolp = bool(re.search(r"addLiquidity|modifyLiquidities|\b\w*(pair|pool|Pair|Pool)\w*\)?\.mint\(", src))
+    return (refund, autolp, True)
+
 def tg(text):
     tok, chat = os.environ.get("TG_TOKEN"), os.environ.get("TG_CHAT_ID")
     if not tok or not chat:
@@ -130,6 +158,11 @@ for c in res["agent_id_candidates"]:
     pbnb = pool[0] if pool else 0
     real = (inflow is not None and inflow >= 3 and w >= 30) or pbnb >= 10
     kind, extra = "代币", ""
+    paid = bal > 0.001 or (inflow or 0) > 0
+    mech = mechanism(a) if paid and not pool else None
+    refund_ok, autolp = (mech[0], mech[1]) if mech else (None, None)
+    if mech and not refund_ok and not autolp:
+        continue  # 无退款 + 无自动加池的付费铸造（或未验证源码）：模板割人盘，不推
     if is_nft(a):
         kind = "NFT"
         if not real:
@@ -149,7 +182,7 @@ for c in res["agent_id_candidates"]:
              f"合约 BNB {bal:.2f}" + (f"，30 分钟流入 {inflow:+.2f}" if inflow is not None else "") + (f"，池内 BNB {pbnb:.1f}" if pool else "，未开池")]
     if extra: lines.append(extra)
     if site: lines.append(f"官网 {site}")
-    lines.append(f"建议：{'NFT ≤10U/项目' if kind == 'NFT' else '付费 ≤10U/笔，每日 ≤30U'}；2 倍回本，5/10 倍分批，回撤 30% 走。退款函数/DEV 历史未自动核实，上车前发给 Hark 复核。")
+    lines.append(f"建议：{'NFT ≤10U/项目' if kind == 'NFT' else '付费 ≤10U/笔，每日 ≤30U'}；2 倍回本，5/10 倍分批，回撤 30% 走。" + ("源码未验证，退款/加池未知；" if refund_ok is None and paid and not pool else "" if refund_ok is None else ("有退款函数，" if refund_ok else "无退款，") + ("打满自动加池；" if autolp else "未见自动加池；")) + "上车前发给 Hark 复核。")
     msgs.append("\n".join(lines))
     st.setdefault("signals", []).append({"tok": a, "sym": c["symbol"] or "?", "src": f"mint-{kind}", "t": now})
 
